@@ -101088,6 +101088,191 @@ function createCompactionHook(options2) {
   };
 }
 
+// src/config-bootstrap.ts
+import {
+  existsSync as existsSync9,
+  mkdirSync as mkdirSync7,
+  readFileSync as readFileSync5,
+  writeFileSync as writeFileSync4,
+  appendFileSync as appendFileSync3
+} from "node:fs";
+import { homedir as homedir5 } from "node:os";
+import { dirname as dirname4, join as join14 } from "node:path";
+import {
+  resolveHiveDataRepoRoot as resolveHiveDataRepoRoot2,
+  resolveHiveDataSlug as resolveHiveDataSlug2,
+  hiveDataProjectDir as hiveDataProjectDir2
+} from "swarm-mail";
+var AGENT_FILE_NAMES = ["AGENTS.md", "CLAUDE.md", "MEMORY.md"];
+var OPENCODE_JSON_SCHEMA = "https://opencode.ai/config.json";
+function isBootstrapManaged(parsed) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return false;
+  }
+  const keys5 = Object.keys(parsed).sort();
+  return keys5.length > 0 && keys5.every((k) => k === "$schema" || k === "instructions");
+}
+function findExistingAgentFile(projectPath) {
+  for (const name of AGENT_FILE_NAMES) {
+    if (existsSync9(join14(projectPath, name)))
+      return name;
+  }
+  return null;
+}
+async function computeInstructions(projectPath, hiveDataRepoOptions) {
+  const hiveDataRoot = resolveHiveDataRepoRoot2(hiveDataRepoOptions);
+  const instructions = [];
+  const globalMemoriesPath = join14(hiveDataRoot, "global", "memories.jsonl");
+  if (existsSync9(globalMemoriesPath)) {
+    instructions.push(globalMemoriesPath);
+  }
+  const slug = await resolveHiveDataSlug2(projectPath);
+  const projectMemoriesPath = join14(hiveDataProjectDir2(hiveDataRoot, slug), "memories.jsonl");
+  if (existsSync9(projectMemoriesPath)) {
+    instructions.push(projectMemoriesPath);
+  }
+  return instructions;
+}
+function writeBootstrapConfig(opencodeJsonPath, instructions) {
+  const config2 = { $schema: OPENCODE_JSON_SCHEMA, instructions };
+  writeFileSync4(opencodeJsonPath, `${JSON.stringify(config2, null, 2)}
+`);
+}
+function sameInstructions(a, b) {
+  if (!Array.isArray(b))
+    return false;
+  if (a.length !== b.length)
+    return false;
+  return a.every((p, i) => b[i] === p);
+}
+async function bootstrapProjectConfig(projectPath, options2 = {}) {
+  const opencodeJsonPath = join14(projectPath, "opencode.json");
+  const existingAgentFile = findExistingAgentFile(projectPath);
+  if (existingAgentFile) {
+    return {
+      action: "skipped-has-agent-file",
+      detail: `${existingAgentFile} already present - honoring it, bootstrap is a no-op.`,
+      opencodeJsonPath
+    };
+  }
+  const instructions = await computeInstructions(projectPath, options2.hiveDataRepoOptions);
+  if (existsSync9(opencodeJsonPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync5(opencodeJsonPath, "utf-8"));
+    } catch {
+      return {
+        action: "skipped-foreign-opencode-json",
+        detail: "Existing opencode.json is not valid JSON - leaving it untouched to avoid clobbering.",
+        opencodeJsonPath
+      };
+    }
+    if (!isBootstrapManaged(parsed)) {
+      return {
+        action: "skipped-foreign-opencode-json",
+        detail: "Existing opencode.json has fields beyond {$schema, instructions} - assumed hand-authored for unrelated reasons. Left untouched.",
+        opencodeJsonPath
+      };
+    }
+    if (sameInstructions(instructions, parsed.instructions)) {
+      return {
+        action: "unchanged",
+        detail: "opencode.json already points at the current hive-data files.",
+        opencodeJsonPath,
+        instructions
+      };
+    }
+    if (instructions.length === 0) {
+      return {
+        action: "skipped-no-hive-data",
+        detail: "No hive-data memories files exist anymore - leaving the existing bootstrap-managed opencode.json as-is rather than emptying it.",
+        opencodeJsonPath
+      };
+    }
+    writeBootstrapConfig(opencodeJsonPath, instructions);
+    return {
+      action: "updated",
+      detail: `Updated bootstrap-managed opencode.json (${instructions.length} instruction file(s)).`,
+      opencodeJsonPath,
+      instructions
+    };
+  }
+  if (instructions.length === 0) {
+    return {
+      action: "skipped-no-hive-data",
+      detail: "Neither global nor project hive-data memories.jsonl exist yet - nothing to point at.",
+      opencodeJsonPath
+    };
+  }
+  writeBootstrapConfig(opencodeJsonPath, instructions);
+  return {
+    action: "created",
+    detail: `Created untracked opencode.json pointing at ${instructions.length} hive-data instruction file(s).`,
+    opencodeJsonPath,
+    instructions
+  };
+}
+var IGNORE_ENTRY = "opencode.json";
+function expandHome(path4, home) {
+  if (path4 === "~")
+    return home;
+  if (path4.startsWith("~/"))
+    return join14(home, path4.slice(2));
+  return path4;
+}
+function defaultGetExcludesFile() {
+  const proc = Bun.spawnSync([
+    "git",
+    "config",
+    "--global",
+    "core.excludesFile"
+  ]);
+  if (proc.exitCode !== 0)
+    return null;
+  const out = proc.stdout.toString("utf-8").trim();
+  return out === "" ? null : out;
+}
+function defaultSetExcludesFile(path4) {
+  Bun.spawnSync(["git", "config", "--global", "core.excludesFile", path4]);
+}
+function ensureOpencodeJsonGloballyIgnored(options2 = {}) {
+  const home = options2.homeDir ?? homedir5();
+  const getExcludesFile = options2.getExcludesFile ?? defaultGetExcludesFile;
+  const setExcludesFile = options2.setExcludesFile ?? defaultSetExcludesFile;
+  const configured = getExcludesFile();
+  let excludesFile;
+  let action;
+  if (configured) {
+    excludesFile = expandHome(configured, home);
+    action = "appended";
+  } else {
+    excludesFile = join14(home, ".config", "git", "ignore");
+    mkdirSync7(dirname4(excludesFile), { recursive: true });
+    if (!existsSync9(excludesFile)) {
+      writeFileSync4(excludesFile, "");
+    }
+    setExcludesFile(excludesFile);
+    action = "created-excludes-file";
+  }
+  const content = existsSync9(excludesFile) ? readFileSync5(excludesFile, "utf-8") : "";
+  const alreadyPresent = content.split(`
+`).some((line) => line.trim() === IGNORE_ENTRY);
+  if (alreadyPresent) {
+    return { action: "already-ignored", excludesFile };
+  }
+  const prefix = content.length > 0 && !content.endsWith(`
+`) ? `
+` : "";
+  appendFileSync3(excludesFile, `${prefix}${IGNORE_ENTRY}
+`);
+  return { action, excludesFile };
+}
+async function runConfigBootstrap(projectPath) {
+  const gitignore = ensureOpencodeJsonGloballyIgnored();
+  const project2 = await bootstrapProjectConfig(projectPath);
+  return { project: project2, gitignore };
+}
+
 // src/index.ts
 init_storage();
 init_skills();
@@ -101742,6 +101927,11 @@ var SwarmPlugin = async (input) => {
   setSkillsProjectDirectory(directory);
   setAgentMailProjectDirectory(directory);
   setSwarmMailProjectDirectory(directory);
+  try {
+    await runConfigBootstrap(directory);
+  } catch (error45) {
+    console.warn(`[swarm-plugin] config bootstrap failed: ${error45 instanceof Error ? error45.message : String(error45)}`);
+  }
   let activeAgentMailState = null;
   async function releaseReservations() {
     if (!activeAgentMailState || activeAgentMailState.reservations.length === 0) {
