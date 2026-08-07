@@ -14042,6 +14042,21 @@ async function importJsonlToPGLite(projectPath) {
 var adapterCache = new Map;
 var exitHookRegistered = false;
 var exitHookRunning = false;
+async function flushCellsToHiveData(projectKey, adapter) {
+  const hiveDataRoot = resolveHiveDataRepoRoot();
+  assertHiveDataRepoReady(hiveDataRoot);
+  assertHiveDataRepoNotMidMerge(hiveDataRoot);
+  const slug = await resolveHiveDataSlug(projectKey);
+  const syncDir = hiveDataProjectDir(hiveDataRoot, slug);
+  mkdirSync2(syncDir, { recursive: true });
+  const flushManager = new FlushManager({
+    adapter,
+    projectKey,
+    outputPath: join2(syncDir, "issues.jsonl")
+  });
+  const { cellsExported } = await flushManager.flush();
+  return { cellsExported, hiveDataRoot, syncDir, slug };
+}
 function registerExitHook() {
   if (exitHookRegistered) {
     return;
@@ -14057,15 +14072,9 @@ function registerExitHook() {
       for (const [projectKey, adapter] of adapterCache.entries()) {
         const flushPromise = (async () => {
           try {
-            ensureHiveDirectory(projectKey);
-            const flushManager = new FlushManager({
-              adapter,
-              projectKey,
-              outputPath: `${projectKey}/.hive/issues.jsonl`
-            });
-            await flushManager.flush();
+            await flushCellsToHiveData(projectKey, adapter);
           } catch (error45) {
-            console.warn(`[hive exit hook] Failed to flush ${projectKey}:`, error45 instanceof Error ? error45.message : String(error45));
+            console.warn(`[hive exit hook] Failed to flush ${projectKey} to hive-data:`, error45 instanceof Error ? error45.message : String(error45));
           }
         })();
         flushPromises.push(flushPromise);
@@ -14303,15 +14312,9 @@ var hive_create_epic = tool({
         console.warn("[hive_create_epic] Failed to capture decomposition_complete event:", error45);
       }
       try {
-        ensureHiveDirectory(projectKey);
-        const flushManager = new FlushManager({
-          adapter,
-          projectKey,
-          outputPath: `${projectKey}/.hive/issues.jsonl`
-        });
-        await flushManager.flush();
+        await flushCellsToHiveData(projectKey, adapter);
       } catch (error45) {
-        console.warn("[hive_create_epic] Failed to sync to JSONL:", error45);
+        console.warn("[hive_create_epic] Failed to sync to hive-data:", error45);
       }
       return JSON.stringify(result, null, 2);
     } catch (error45) {
@@ -14733,26 +14736,23 @@ var hive_sync = tool({
         }
       }
     };
-    const hiveDataRoot = resolveHiveDataRepoRoot();
+    let hiveDataRoot;
+    let syncDir;
+    let slug;
+    let flushResult;
     try {
-      assertHiveDataRepoReady(hiveDataRoot);
-      assertHiveDataRepoNotMidMerge(hiveDataRoot);
+      const flushed = await withTimeout(flushCellsToHiveData(projectKey, adapter), TIMEOUT_MS, "flush hive");
+      hiveDataRoot = flushed.hiveDataRoot;
+      syncDir = flushed.syncDir;
+      slug = flushed.slug;
+      flushResult = flushed;
     } catch (err) {
       if (err instanceof HiveDataRepoError) {
         throw new HiveError(err.message, "hive_sync");
       }
       throw err;
     }
-    const slug = await resolveHiveDataSlug(projectKey);
-    const syncDir = hiveDataProjectDir(hiveDataRoot, slug);
-    mkdirSync2(syncDir, { recursive: true });
     const syncDirRelative = relative(hiveDataRoot, syncDir);
-    const flushManager = new FlushManager({
-      adapter,
-      projectKey,
-      outputPath: join2(syncDir, "issues.jsonl")
-    });
-    const flushResult = await withTimeout(flushManager.flush(), TIMEOUT_MS, "flush hive");
     const swarmMail = await getSwarmMailLibSQL2(projectKey);
     const db = await swarmMail.getDatabase();
     const globalMemoriesPath = join2(hiveDataRoot, "global", "memories.jsonl");
