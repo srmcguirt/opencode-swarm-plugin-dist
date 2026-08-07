@@ -14934,7 +14934,8 @@ Use project_key param to query them.`;
       try {
         const memoryResult = await syncProjectMemoriesToHiveData(db, {
           globalMemoriesPath,
-          projectMemoriesPath
+          projectMemoriesPath,
+          repoKey: slug
         });
         memoriesSynced = memoryResult.projectExported;
       } catch (err) {
@@ -48742,11 +48743,6 @@ async function createMemoryAdapter(db) {
       return [];
     return tags.split(",").map((t) => t.trim()).filter(Boolean);
   };
-  const truncateContent = (content, maxLength = 200) => {
-    if (content.length <= maxLength)
-      return content;
-    return `${content.substring(0, maxLength)}...`;
-  };
   return {
     async store(args2) {
       const result = await realAdapter.store(args2.information, {
@@ -48777,38 +48773,18 @@ Linked to ${result.links.length} related memor${result.links.length === 1 ? "y" 
         throw new Error("query is required for find operation");
       }
       const limit = args2.limit ?? 10;
-      let results;
-      let usedFallback = false;
-      if (args2.fts) {
-        results = await store.ftsSearch(args2.query, {
-          limit,
-          collection: args2.collection
-        });
-      } else {
-        const program = exports_Effect.gen(function* () {
-          const ollama = yield* Ollama;
-          return yield* ollama.embed(args2.query);
-        });
-        try {
-          const queryEmbedding = await exports_Effect.runPromise(program.pipe(exports_Effect.provide(ollamaLayer)));
-          results = await store.search(queryEmbedding, {
-            limit,
-            threshold: 0.3,
-            collection: args2.collection
-          });
-        } catch (e) {
-          console.warn("[hivemind] Ollama unavailable, falling back to full-text search");
-          usedFallback = true;
-          results = await store.ftsSearch(args2.query, {
-            limit,
-            collection: args2.collection
-          });
-        }
-      }
+      const results = await realAdapter.find(args2.query, {
+        limit,
+        collection: args2.collection,
+        expand: args2.expand,
+        fts: args2.fts,
+        scope: "auto"
+      });
+      const usedFallback = !args2.fts && results.length > 0 && results.every((r) => r.matchType === "fts");
       const response = {
         results: results.map((r) => ({
           id: r.memory.id,
-          content: args2.expand ? r.memory.content : truncateContent(r.memory.content),
+          content: r.memory.content,
           score: r.score,
           collection: r.memory.collection,
           metadata: r.memory.metadata,

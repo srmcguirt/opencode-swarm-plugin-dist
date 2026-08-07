@@ -14761,7 +14761,8 @@ var hive_sync = tool({
     try {
       const memoryResult = await syncProjectMemoriesToHiveData(db, {
         globalMemoriesPath,
-        projectMemoriesPath
+        projectMemoriesPath,
+        repoKey: slug
       });
       memoriesSynced = memoryResult.projectExported;
     } catch (err) {
