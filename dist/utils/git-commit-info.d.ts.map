@@ -1,0 +1,1 @@
+{"version":3,"file":"git-commit-info.d.ts","sourceRoot":"","sources":["../../src/utils/git-commit-info.ts"],"names":[],"mappings":"AAEA,MAAM,WAAW,aAAa;IAC5B,GAAG,EAAE,MAAM,CAAC;IACZ,OAAO,EAAE,MAAM,CAAC;IAChB,MAAM,EAAE,MAAM,CAAC;CAChB;AAED;;GAEG;AACH,wBAAgB,gBAAgB,CAAC,GAAG,CAAC,EAAE,MAAM,GAAG,aAAa,GAAG,IAAI,CAUnE"}

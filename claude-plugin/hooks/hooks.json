@@ -1,0 +1,184 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude session-start"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "coordinator",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude coordinator-start"
+          }
+        ]
+      },
+      {
+        "matcher": "worker",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude worker-start"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude subagent-stop"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude agent-stop"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude user-prompt"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude pre-edit"
+          }
+        ]
+      },
+      {
+        "matcher": "swarm_complete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude pre-complete"
+          }
+        ]
+      },
+      {
+        "matcher": "TaskCreate|TaskUpdate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude track-task"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "hivemind_find|mcp__plugin_swarm_swarm-tools__hivemind_find",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude track-tool hivemind_find"
+          }
+        ]
+      },
+      {
+        "matcher": "skills_use|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude track-tool skills_use"
+          }
+        ]
+      },
+      {
+        "matcher": "swarmmail_init|mcp__plugin_swarm_swarm-tools__swarmmail_init",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude track-tool swarmmail_init"
+          }
+        ]
+      },
+      {
+        "matcher": "hivemind_store|mcp__plugin_swarm_swarm-tools__hivemind_store",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude track-tool hivemind_store"
+          }
+        ]
+      },
+      {
+        "matcher": "swarm_complete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude post-complete"
+          }
+        ]
+      },
+      {
+        "matcher": "TaskUpdate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude post-task-update"
+          }
+        ]
+      },
+      {
+        "matcher": "skills_create|skills_update|skills_init|mcp__plugin_swarm_swarm-tools__skills_create|mcp__plugin_swarm_swarm-tools__skills_update",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude skill-reload"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude pre-compact"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude session-end"
+          }
+        ]
+      }
+    ]
+  }
+}
