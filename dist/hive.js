@@ -13259,14 +13259,20 @@ import {
   createHiveAdapter,
   FlushManager,
   importFromJSONL,
-  syncMemories,
+  syncProjectMemoriesToHiveData,
+  resolveHiveDataRepoRoot,
+  assertHiveDataRepoReady,
+  assertHiveDataRepoNotMidMerge,
+  HiveDataRepoError,
+  resolveHiveDataSlug,
+  hiveDataProjectDir,
   getSwarmMailLibSQL as getSwarmMailLibSQL2,
   resolvePartialId,
   findCellsByPartialId,
   listProjects
 } from "swarm-mail";
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { existsSync as existsSync2, readFileSync as readFileSync2, mkdirSync as mkdirSync2 } from "node:fs";
+import { join as join2, relative } from "node:path";
 
 // src/schemas/cell.ts
 init_zod();
@@ -13851,8 +13857,7 @@ function getHiveWorkingDirectory() {
 }
 var setBeadsWorkingDirectory = setHiveWorkingDirectory;
 var getBeadsWorkingDirectory = getHiveWorkingDirectory;
-async function runGitCommand(args) {
-  const cwd = getHiveWorkingDirectory();
+async function runGitCommand(args, cwd) {
   const proc = Bun.spawn(["git", ...args], {
     cwd,
     stdout: "pipe",
@@ -13926,8 +13931,8 @@ async function migrateBeadsToHive(projectPath) {
 function ensureHiveDirectory(projectPath) {
   const hiveDir = join2(projectPath, ".hive");
   if (!existsSync2(hiveDir)) {
-    const { mkdirSync: mkdirSync2 } = __require("node:fs");
-    mkdirSync2(hiveDir, { recursive: true });
+    const { mkdirSync: mkdirSync3 } = __require("node:fs");
+    mkdirSync3(hiveDir, { recursive: true });
   }
 }
 async function mergeHistoricBeads(projectPath) {
@@ -14204,7 +14209,10 @@ var hive_create_epic = tool({
           subtasks: [
             { title: "Create auth service", files: ["src/auth/service.ts"] },
             { title: "Add login endpoint", files: ["src/api/login.ts"] },
-            { title: "Add session middleware", files: ["src/middleware/session.ts"] }
+            {
+              title: "Add session middleware",
+              files: ["src/middleware/session.ts"]
+            }
           ]
         },
         tip: "Each subtask should have a title and optionally files it will modify. This helps with file reservation and parallel execution."
@@ -14443,7 +14451,9 @@ var hive_close = tool({
       await adapter.markDirty(projectKey, cellId);
       if (isEpic && cellBeforeClose) {
         try {
-          const subtasks = await adapter.queryCells(projectKey, { parent_id: cellId });
+          const subtasks = await adapter.queryCells(projectKey, {
+            parent_id: cellId
+          });
           const completedSubtasks = subtasks.filter((st) => st.status === "closed");
           const failedSubtasks = subtasks.filter((st) => st.status === "blocked");
           let totalFilesTouched = [];
@@ -14723,75 +14733,88 @@ var hive_sync = tool({
         }
       }
     };
-    ensureHiveDirectory(projectKey);
+    const hiveDataRoot = resolveHiveDataRepoRoot();
+    try {
+      assertHiveDataRepoReady(hiveDataRoot);
+      assertHiveDataRepoNotMidMerge(hiveDataRoot);
+    } catch (err) {
+      if (err instanceof HiveDataRepoError) {
+        throw new HiveError(err.message, "hive_sync");
+      }
+      throw err;
+    }
+    const slug = await resolveHiveDataSlug(projectKey);
+    const syncDir = hiveDataProjectDir(hiveDataRoot, slug);
+    mkdirSync2(syncDir, { recursive: true });
+    const syncDirRelative = relative(hiveDataRoot, syncDir);
     const flushManager = new FlushManager({
       adapter,
       projectKey,
-      outputPath: `${projectKey}/.hive/issues.jsonl`
+      outputPath: join2(syncDir, "issues.jsonl")
     });
     const flushResult = await withTimeout(flushManager.flush(), TIMEOUT_MS, "flush hive");
     const swarmMail = await getSwarmMailLibSQL2(projectKey);
     const db = await swarmMail.getDatabase();
-    const hivePath = join2(projectKey, ".hive");
+    const globalMemoriesPath = join2(hiveDataRoot, "global", "memories.jsonl");
+    const projectMemoriesPath = join2(syncDir, "memories.jsonl");
     let memoriesSynced = 0;
     try {
-      const memoryResult = await syncMemories(db, hivePath);
-      memoriesSynced = memoryResult.exported;
+      const memoryResult = await syncProjectMemoriesToHiveData(db, {
+        globalMemoriesPath,
+        projectMemoriesPath
+      });
+      memoriesSynced = memoryResult.projectExported;
     } catch (err) {
       console.warn("[hive_sync] Memory sync warning:", err);
     }
     if (flushResult.cellsExported === 0 && memoriesSynced === 0) {
       return "No cells or memories to sync";
     }
-    const hiveStatusResult = await runGitCommand([
-      "status",
-      "--porcelain",
-      ".hive/"
-    ]);
+    const hiveStatusResult = await runGitCommand(["status", "--porcelain", syncDirRelative], hiveDataRoot);
     const hasChanges = hiveStatusResult.stdout.trim() !== "";
     if (hasChanges) {
-      const addResult = await runGitCommand(["add", ".hive/"]);
+      const addResult = await runGitCommand(["add", syncDirRelative], hiveDataRoot);
       if (addResult.exitCode !== 0) {
-        throw new HiveError(`Failed to stage hive: ${addResult.stderr}`, "git add .hive/", addResult.exitCode);
+        throw new HiveError(`Failed to stage hive-data: ${addResult.stderr}`, `git add ${syncDirRelative}`, addResult.exitCode);
       }
-      const commitResult = await withTimeout(runGitCommand(["commit", "-m", "chore: sync hive"]), TIMEOUT_MS, "git commit");
+      const commitResult = await withTimeout(runGitCommand(["commit", "-m", `chore: sync hive (${slug})`], hiveDataRoot), TIMEOUT_MS, "git commit");
       if (commitResult.exitCode !== 0 && !commitResult.stdout.includes("nothing to commit")) {
-        throw new HiveError(`Failed to commit hive: ${commitResult.stderr}`, "git commit", commitResult.exitCode);
+        throw new HiveError(`Failed to commit hive-data: ${commitResult.stderr}`, "git commit", commitResult.exitCode);
       }
     }
     if (autoPull) {
-      const remoteCheckResult2 = await runGitCommand(["remote"]);
+      const remoteCheckResult2 = await runGitCommand(["remote"], hiveDataRoot);
       const hasRemote2 = remoteCheckResult2.stdout.trim() !== "";
       if (hasRemote2) {
-        const statusResult = await runGitCommand(["status", "--porcelain"]);
+        const statusResult = await runGitCommand(["status", "--porcelain"], hiveDataRoot);
         const hasUnstagedChanges = statusResult.stdout.trim() !== "";
         let didStash = false;
         if (hasUnstagedChanges) {
-          const stashResult = await runGitCommand(["stash", "push", "-u", "-m", "hive_sync: auto-stash before pull"]);
+          const stashResult = await runGitCommand(["stash", "push", "-u", "-m", "hive_sync: auto-stash before pull"], hiveDataRoot);
           if (stashResult.exitCode === 0) {
             didStash = true;
           }
         }
         try {
-          const pullResult = await withTimeout(runGitCommand(["pull", "--rebase"]), TIMEOUT_MS, "git pull --rebase");
+          const pullResult = await withTimeout(runGitCommand(["pull", "--rebase"], hiveDataRoot), TIMEOUT_MS, "git pull --rebase");
           if (pullResult.exitCode !== 0) {
             throw new HiveError(`Failed to pull: ${pullResult.stderr}`, "git pull --rebase", pullResult.exitCode);
           }
         } finally {
           if (didStash) {
-            const popResult = await runGitCommand(["stash", "pop"]);
+            const popResult = await runGitCommand(["stash", "pop"], hiveDataRoot);
             if (popResult.exitCode !== 0) {
-              console.warn(`[hive_sync] Warning: stash pop failed. Your changes are in 'git stash list'. Error: ${popResult.stderr}`);
+              console.warn(`[hive_sync] Warning: stash pop failed. Your changes are in 'git stash list' in ${hiveDataRoot}. Error: ${popResult.stderr}`);
             }
           }
         }
       }
     }
-    const remoteCheckResult = await runGitCommand(["remote"]);
+    const remoteCheckResult = await runGitCommand(["remote"], hiveDataRoot);
     const hasRemote = remoteCheckResult.stdout.trim() !== "";
     let pushSuccess = false;
     if (hasRemote) {
-      const pushResult = await withTimeout(runGitCommand(["push"]), TIMEOUT_MS, "git push");
+      const pushResult = await withTimeout(runGitCommand(["push"], hiveDataRoot), TIMEOUT_MS, "git push");
       if (pushResult.exitCode !== 0) {
         throw new HiveError(`Failed to push: ${pushResult.stderr}`, "git push", pushResult.exitCode);
       }
@@ -14808,9 +14831,9 @@ var hive_sync = tool({
       console.warn("[hive_sync] Failed to emit hive_synced event:", error45);
     }
     if (hasRemote) {
-      return "Hive synced and pushed successfully";
+      return `Hive synced to hive-data (${syncDirRelative}) and pushed successfully`;
     } else {
-      return "Hive synced successfully (no remote configured)";
+      return `Hive synced to hive-data (${syncDirRelative}) successfully (no remote configured)`;
     }
   }
 });
