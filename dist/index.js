@@ -101098,12 +101098,21 @@ function findExistingAgentFile(projectPath) {
 async function computeInstructions(projectPath, hiveDataRepoOptions) {
   const hiveDataRoot = resolveHiveDataRepoRoot2(hiveDataRepoOptions);
   const instructions = [];
+  const globalAgentsPath = join14(hiveDataRoot, "global", "AGENTS.md");
+  if (existsSync9(globalAgentsPath)) {
+    instructions.push(globalAgentsPath);
+  }
   const globalMemoriesPath = join14(hiveDataRoot, "global", "memories.jsonl");
   if (existsSync9(globalMemoriesPath)) {
     instructions.push(globalMemoriesPath);
   }
   const slug = await resolveHiveDataSlug2(projectPath);
-  const projectMemoriesPath = join14(hiveDataProjectDir2(hiveDataRoot, slug), "memories.jsonl");
+  const projectDir = hiveDataProjectDir2(hiveDataRoot, slug);
+  const projectAgentsPath = join14(projectDir, "AGENTS.md");
+  if (existsSync9(projectAgentsPath)) {
+    instructions.push(projectAgentsPath);
+  }
+  const projectMemoriesPath = join14(projectDir, "memories.jsonl");
   if (existsSync9(projectMemoriesPath)) {
     instructions.push(projectMemoriesPath);
   }

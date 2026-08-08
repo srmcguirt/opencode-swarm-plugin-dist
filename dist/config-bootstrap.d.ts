@@ -2,9 +2,10 @@
  * Per-project opencode.json config bootstrap.
  *
  * Points a project's opencode agent config at its hive-data mirror
- * (`~/hive-data/repos/<slug>/memories.jsonl` and
- * `~/hive-data/global/memories.jsonl`) without ever writing agentic
- * content (prose, process vocabulary) into the project itself.
+ * (`~/hive-data/repos/<slug>/AGENTS.md` and `memories.jsonl`, plus
+ * `~/hive-data/global/AGENTS.md` and `~/hive-data/global/memories.jsonl`)
+ * without ever writing agentic content (prose, process vocabulary) into
+ * the project itself.
  *
  * Policy:
  * - A project with its own AGENTS.md/CLAUDE.md/MEMORY.md is left alone —
